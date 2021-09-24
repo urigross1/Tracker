@@ -1,0 +1,28 @@
+init
+
+InTrack = false
+bbox = None
+while true:
+{
+    read frame
+    found = false:
+
+    if InTrack == true:
+        ok, bbox = track_update(frame)
+        if ok:
+            found = True
+        else:
+            InTrack = False
+
+    if not found:
+        ok, bbox = detect(frame)
+        if ok:
+            found = True
+            InTrack = true
+            tracker_init(frame, bbox)
+
+    show_frame(frame, found, bbox)
+        {
+
+
+        }
