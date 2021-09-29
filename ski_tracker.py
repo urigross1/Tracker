@@ -109,8 +109,9 @@ pad_y = max(img_w - img_h, 0) * (img_size / max(frame.shape))
 unpad_h = img_size - pad_y
 unpad_w = img_size - pad_x
 
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-outvideo = cv2.VideoWriter(videopath.replace(".mp4", "-det.mp4"),fourcc,20.0,(out_w,out_h))
+fourcc = cv2.VideoWriter_fourcc(*"MP4V")
+outvideo = cv2.VideoWriter(videopath.replace(".mp4", "-det.mp4"),fourcc,20.0,(out_w,out_w))
+
 
 
 bbox = None
@@ -156,9 +157,10 @@ while(True): # go over all video
 
     show_frame(frame,found, bbox)
 
-    outvideo.write(frame[0:639, 0:359, :])#y1:y2, x1:x2])
-
+    outvideo.write(frame[0:out_w, 0:out_w])#y1:y2, x1:x2])
+    if frames == 100:
+        break
 totaltime = time.time()-starttime
 print(frames, "frames", totaltime/frames, "s/frame")
-cv2.destroyAllWindows()
 outvideo.release()
+cv2.destroyAllWindows()
