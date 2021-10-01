@@ -31,29 +31,6 @@ def detect_image(img):
     return detections[0]
 
 
-def clc_center_bbox(bbox):
-    (x1, y1, box_w, box_h) = bbox
-    x_center = int(x1 + box_w/2)
-    y_center = int(y1 + box_h/2)
-    return (x_center, y_center)
-
-
-def show_frame(frame,found, bbox):
-    if found:
-        (x1, y1, box_w, box_h) = bbox
-        (x_center, y_center) = clc_center_bbox(bbox)
-        cv2.circle(frame, (x_center, y_center), 2, (128,0,128), 4)
-        cv2.rectangle(frame, (x1, y1), (x1+box_w, y1+box_h), (0,0,255), 4)
-        # cv2.rectangle(frame, (x1, y1-35), (x1+len(cls)*19+80, y1), color, -1)
-        # cv2.putText(frame, cls + "-" + str(int(obj_id)), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 3)
-
-    cv2.imshow('Stream', frame)
-    outvideo.write(frame)
-    ch = 0xFF & cv2.waitKey(1)
-    if ch == 27:
-        exit(0)
-
-
 def make_bbox(x1, y1, x2, y2, img_h, img_w, unpad_h, unpad_w):
     box_h = int(((y2 - y1) / unpad_h) * img_h)
     box_w = int(((x2 - x1) / unpad_w) * img_w)
@@ -62,6 +39,46 @@ def make_bbox(x1, y1, x2, y2, img_h, img_w, unpad_h, unpad_w):
 
     bbox = (x1, y1, box_w, box_h)
     return bbox
+
+
+def clc_center_bbox(bbox):
+    (x1, y1, box_w, box_h) = bbox
+    x_center = int(x1 + box_w/2)
+    y_center = int(y1 + box_h/2)
+    return (y_center, x_center)
+
+
+def safe_new_frame_center(found, center, old_shape, new_shape):
+    safe_new_center = [int(old_shape[0]/2), int(old_shape[1]/2)] # TODO default center
+    if found:
+        for i in [0, 1]:
+            half_size = int(new_shape[i]/2)
+            safe_new_center[i] = max(center[i], half_size)
+            safe_new_center[i] = min(safe_new_center[i], old_shape[i] - half_size)
+    return safe_new_center
+
+
+def safe_new_frame_points(safe_center, new_shape):
+   x1 = safe_center[1] - int(new_shape[1]/2)
+   y1 = safe_center[0] - int(new_shape[0]/2)
+   x2 = safe_center[1] + int(new_shape[1]/2)
+   y2 = safe_center[0] + int(new_shape[0]/2)
+   return x1, y1, x2, y2
+
+
+def show_frame(frame, found, bbox):
+    if found:
+        (x1, y1, box_w, box_h) = bbox
+        (y_center, x_center) = clc_center_bbox(bbox)
+        cv2.circle(frame, (x_center, y_center), 2, (128,0,128), 4)
+        cv2.rectangle(frame, (x1, y1), (x1+box_w, y1+box_h), (0,0,255), 4)
+        # cv2.putText(frame, cls + "-" + str(int(obj_id)), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 3)
+
+    cv2.imshow('Stream', frame)
+    ch = 0xFF & cv2.waitKey(1)
+    if ch == 27:
+        exit(0)
+
 
 
 
@@ -83,7 +100,7 @@ model.eval()
 classes = utils.load_classes(class_path)
 Tensor = torch.FloatTensor  # add cuda for GPU
 
-videopath = 'videos/ski1.mp4'
+videopath = 'videos/ski2.mp4'
 vid = cv2.VideoCapture(videopath)
 
 cv2.namedWindow('Stream',cv2.WINDOW_NORMAL)
@@ -104,28 +121,33 @@ img_h = vh
 img_w = vw
 out_h = int(img_h/output_ratio)
 out_w = int(img_w/output_ratio)
+new_shape = (out_h, out_w) # problem with  anon square frame
+new_shape_reversed = (out_w, out_h) # problem with  anon square frame
+
 pad_x = max(img_h - img_w, 0) * (img_size / max(frame.shape))
 pad_y = max(img_w - img_h, 0) * (img_size / max(frame.shape))
 unpad_h = img_size - pad_y
 unpad_w = img_size - pad_x
 
 fourcc = cv2.VideoWriter_fourcc(*"MP4V")
-outvideo = cv2.VideoWriter(videopath.replace(".mp4", "-det.mp4"),fourcc,20.0,(out_w,out_w))
+outvideo = cv2.VideoWriter(videopath.replace(".mp4", "-det.mp4"),fourcc,20.0,new_shape_reversed)
 
-
+center = [round(img_h/2), round(img_w/2)]
 
 bbox = None
 InTrack = False
 while(True): # go over all video
-    found = False
     ret, frame = vid.read()
-    #TODO end of video
     if not ret:
-        raise ("couldn't read video")
+        break  # most likely end of video is reached
+
+    found = False
     frames += 1
     print("frame: ", frames)
-    pilimg = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    if frames < 60:
+        continue
 
+    pilimg = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     if InTrack:
         ok, bbox = tracker.update(frame)
         if ok:
@@ -149,17 +171,18 @@ while(True): # go over all video
                 print("found a person")
                 found = True
                 bbox = make_bbox(x1, y1, x2, y2, img_h, img_w, unpad_h, unpad_w)
-                (x_center, y_center) = clc_center_bbox(bbox)
                 InTrack = True
                 tracker = cv2.TrackerCSRT_create()
                 ok = tracker.init(frame, bbox)
                 break  # one person is enough
 
-    show_frame(frame,found, bbox)
+    show_frame(np.copy(frame), found, bbox)
+    if found:
+        center = clc_center_bbox(bbox)
+    safe_center = safe_new_frame_center(found, center, [img_h, img_w], new_shape)
+    x1, y1, x2, y2 = safe_new_frame_points(safe_center, new_shape)
+    outvideo.write(frame[y1:y2, x1:x2])
 
-    outvideo.write(frame[0:out_w, 0:out_w])#y1:y2, x1:x2])
-    if frames == 100:
-        break
 totaltime = time.time()-starttime
 print(frames, "frames", totaltime/frames, "s/frame")
 outvideo.release()
